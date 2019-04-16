@@ -15,17 +15,17 @@
 #define MAX_V 100
 // theta has freedom, the robot can rotat all it wants in either direction
 
-// initialize global structure for speed and angle to 0
-volatile Velocity a;
-volatile a.v = 0;
-volatile a.theta = 0;
-
-
 // structure containing speed and angle of robot
 struct Velocity {
 	int v;
 	int theta;
-}
+};
+
+
+// initialize global structure for speed and angle to 0
+volatile struct Velocity a;
+volatile a.v = 0;
+volatile a.theta = 0;
 
 
 int main(){
