@@ -1,8 +1,112 @@
 /*  Make sure the wpa_supplicant.conf has the correct hostname and password
 	to connect to the microcontroller access point!							*/
-	
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 
-void tempfunc(){
+#define BUFSIZE 1024
+
+#define MIN_V 0
+#define MAX_V 100
+// theta has freedom, the robot can rotat all it wants in either direction
+
+// initialize global structure for speed and angle to 0
+volatile Velocity a;
+volatile a.v = 0;
+volatile a.theta = 0;
+
+
+// structure containing speed and angle of robot
+struct Velocity {
+	int v;
+	int theta;
+}
+
+
+int main(){
+	
+	///// NETWORKING /////
+	int sockfd, portno, n;
+    int serverlen;
+    struct sockaddr_in serveraddr;
+    struct hostent *server;
+    char *hostname;
+    char buf[BUFSIZE];
+	
+	hostname = "";  // make sure hostname and password match with uC access point
+    portno = "";
+	
+	/* socket: create the socket */
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) 
+        error("ERROR opening socket");
+
+    /* gethostbyname: get the server's DNS entry */
+    server = gethostbyname(hostname);
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host as %s\n", hostname);
+        exit(0);
+    }
+
+    /* build the server's Internet address */
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr, 
+	  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+    serveraddr.sin_port = htons(portno);
+	/////////////////////////
+	
+	
+	
+	///// GET USER/SEND DATA LOOP /////
+	char x = 0;
+    while(1){
+        x = getch();
+
+        switch(x)					// similar to video games, W/S will put the speed of the robot up and down
+        {                           // A/D will turn the robot left and right
+            case 'W':               // each input changes the global desired values of the robot, meaning 
+            case 'w':               // only holding down W won't necessarily make the robot move forware, but
+                a.v = a.v + 5;      // after several presses of the W key the robot will move at a constant speed
+                break;
+            case 'A':
+            case 'a':
+                a.theta + 5;
+                break;
+            case 's':
+            case 'S':
+                a.v = a.v - 5;
+                break;
+            case 'D':
+            case 'd':
+                a.theta - 5;
+                break;
+
+        }
+		if (MIN_V > a.v){
+			a.v = MIN_V;
+		}
+		if (MAX_V < a.v){
+			a.v = MAX_V;
+		}
+		
+		// now send the struct over UDP
+		serverlen = sizeof(serveraddr);
+		n = sendto(sockfd, a, strlen(a), 0, &serveraddr, serverlen);
+		if (n < 0) 
+			error("ERROR in sendto");
+
+    }
+	
+}
+
+//////////// OLD SKELETON CODE //////////////
+
 // ConnectToPort();  connect to the correct UDP port to contact the microcontroller
 // InitStruct();  initialize data structures
 // while(1){
