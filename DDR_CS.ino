@@ -34,10 +34,6 @@ static char ssid[] = "";    // your network SSID (name)
 static char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
 static int keyIndex = 0;    // your network key Index number (needed only for WEP)
 int status = WL_IDLE_STATUS;
-// variables for UDP
-unsigned int localPort = 5000;      // local port to listen on
-char packetBuffer[1023]; //buffer to hold incoming packet
-WiFiUDP Udp;
 // structure for speed and angle of robot
 struct Velocity {
   int v;
@@ -45,6 +41,11 @@ struct Velocity {
 };
 // initializing structs
 struct Velocity a;
+// variables for UDP
+unsigned int localPort = 5000;      // local port to listen on
+byte packetBuffer[sizeof(a)]; //buffer to hold incoming packet
+WiFiUDP Udp;
+#pragma pack(0)
 // variables for IMU
 LSM303 compass;
 int pickedup = 0;
@@ -196,9 +197,10 @@ void CheckIMU(){
 void CheckUDP(){
   int packetSize = Udp.parsePacket();
   if (packetSize){
-    int len = Udp.read(packetBuffer, 1023);
-    if (len > 0) packetBuffer[len] = 0;
-    // a = (Velocity)packetBuffer;
+    int len = Udp.read(packetBuffer, sizeof(packetBuffer));
+    a.v = byte(packetBuffer[0]);
+    a.theta = byte(packetBuffer[1]);
+    memset(packetBuffer, 0, sizeof(packetBuffer));
   }
 }
 

@@ -9,11 +9,15 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-#define BUFSIZE 1024
+#define BUFSIZE 2
 
 #define MIN_V 0
 #define MAX_V 100
-// theta has freedom, the robot can rotat all it wants in either direction
+#define MIN_THETA -180
+#define MAX_THETA 180
+
+#pragma pack(0)  // turn off struct packing
+
 
 // structure containing speed and angle of robot
 struct Velocity {
@@ -36,7 +40,7 @@ int main(){
     struct sockaddr_in serveraddr;
     struct hostent *server;
     char *hostname;
-    char buf[BUFSIZE];
+    int buf[BUFSIZE];
 	
 	hostname = "";  // make sure hostname and password match with uC access point
     portno = "";
@@ -94,10 +98,18 @@ int main(){
 		if (MAX_V < a.v){
 			a.v = MAX_V;
 		}
+		if (MIN_THETA > a.theta){
+			a.theta = MIN_THETA;
+		}
+		if (MAX_THETA < a.theta){
+			a.theta = MAX_THETA;
+		}
 		
 		// now send the struct over UDP
+		buf[0] = a.v;
+		buf[1] = a.theta
 		serverlen = sizeof(serveraddr);
-		n = sendto(sockfd, a, strlen(a), 0, &serveraddr, serverlen);
+		n = sendto(sockfd, buf, sizeof(buf), 0, &serveraddr, serverlen);
 		if (n < 0) 
 			error("ERROR in sendto");
 
