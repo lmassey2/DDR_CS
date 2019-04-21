@@ -7,9 +7,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h>
+#include <netdb.h> 
 
-#define BUFSIZE 2
+#define BUFSIZE 1024
 
 #define MIN_V 0
 #define MAX_V 100
@@ -28,6 +28,18 @@ struct Velocity {
 volatile struct Velocity a;
 
 
+
+/* 
+ * error - wrapper for perror
+ */
+void error(char *msg) {
+    perror(msg);
+    exit(0);
+}
+
+
+
+
 int main(){
 	
 
@@ -39,7 +51,6 @@ int main(){
     struct sockaddr_in serveraddr;
     struct hostent *server;
     char *hostname;
-    int buf[BUFSIZE];
 	
 	hostname = "192.168.1.1";  // make sure hostname and password match with uC access point
     portno = "5000";
@@ -70,9 +81,12 @@ int main(){
 	///// GET USER/SEND DATA LOOP /////
 	char x = 0;
 	int time_to_send = 0;
+	char outString[100];
+	char vString[5];
+	char thetaString[5];
     while(1){
         scanf("%c", &x);
-	printf("x = %c\n", x);
+		printf("x = %c\n", x);
 
         switch(x)					// similar to video games, W/S will put the speed of the robot up and down
         {                           // A/D will turn the robot left and right
@@ -120,17 +134,27 @@ int main(){
 		if (MAX_THETA < a.theta){
 			a.theta = MAX_THETA;
 		}
-		printf("a.v = %d\n", a.v);
-		printf("a.theta = %d\n", a.theta);
-		
-		// now send the struct over UDP
-		buf[0] = a.v;
-		buf[1] = a.theta;
-		serverlen = sizeof(serveraddr);
-		n = sendto(sockfd, buf, sizeof(buf), 0, &serveraddr, serverlen);
-		if (n < 0) 
-			error("ERROR in sendto");
-
+		if (1 == time_to_send){
+			sprintf(vString, "%d", a.v);
+			sprintf(thetaString, "%d", a.theta);
+			printf("a.v = %s\n", vString);
+			printf("a.theta = %s\n", thetaString);
+			strcpy(outString, vString);
+			strcat(outString, "a");
+			strcat(outString, thetaString);
+			strcat(outString, "b");
+			
+			// now send the struct over UDP
+			serverlen = sizeof(serveraddr);
+			n = sendto(sockfd, outString, sizeof(outString), 0, &serveraddr, serverlen);
+			if (n < 0){
+				error("ERROR in sendto");
+			}
+			time_to_send = 0;
+			memset(outString,0,sizeof(outString));
+			memset(vString,0,sizeof(vString));
+			memset(thetaString,0,sizeof(thetaString));
+		}
     }
 	
 }
@@ -146,4 +170,3 @@ int main(){
 // 		a.theta = theta;
 //		Send(a);			put speed and angle into a struct and send over UDP
 // }						|||can also use netcat to make sure data is being sent|||
-
