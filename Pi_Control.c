@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <conio.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -28,8 +29,8 @@ struct Velocity {
 
 // initialize global structure for speed and angle to 0
 volatile struct Velocity a;
-volatile a.v = 0;
-volatile a.theta = 0;
+a.v = 0;
+a.theta = 0;
 
 
 int main(){
@@ -107,7 +108,7 @@ int main(){
 		
 		// now send the struct over UDP
 		buf[0] = a.v;
-		buf[1] = a.theta
+		buf[1] = a.theta;
 		serverlen = sizeof(serveraddr);
 		n = sendto(sockfd, buf, sizeof(buf), 0, &serveraddr, serverlen);
 		if (n < 0) 
