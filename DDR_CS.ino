@@ -16,13 +16,13 @@ using namespace BLA;
 #define IRPIN_R 10
 #define IRPIN_L 11
 //constants for robot dimensions
-#define BASE_L 80   //distance between wheels(mm)
-#define WHEEL_R 20  //radius of wheels(mm)
+#define BASE_L 95   //distance between wheels(mm)
+#define WHEEL_R 15  //radius of wheels(mm)
 #define TICKS 2     //number of rising edge ticks of encoder
 #define GEAR_RATIO 75.81    //gear ratio of motor
 #define DELTA_THETA_R ((2*PI/TICKS)/GEAR_RATIO)   //radians wheel travels per tick
 #define PT (WHEEL_R*DELTA_THETA_R)    //distance wheel travels per tick
-#define PHI atan2(PT, BASE_L)   //angle change of robot per tick (radians)
+#define PHI (atan2(PT, BASE_L)*(180/PI))   //angle change of robot per tick (degrees)
 #define MAX_RPM 180           // maximum RPM of the motor
 #define RPM_TO_PWM 1.417      // ratio of max RPM to max PWM
 #define PERC_TO_RPM 1.8       // ration of max percentage to max RPM 
@@ -43,12 +43,15 @@ struct Velocity {
 struct Velocity a;
 // variables for UDP
 unsigned int localPort = 5000;      // local port to listen on
-byte packetBuffer[sizeof(a)]; //buffer to hold incoming packet
+char packetBuffer[255]; //buffer to hold incoming packet
 WiFiUDP Udp;
-#pragma pack(0)
 // variables for IMU
+#define MAG_RATIO 0.160  // magnetometer ratio in spec sheet
 LSM303 compass;
 int pickedup = 0;
+volatile float prev_imu_angle = 0;
+volatile float cur_imu_angle = 0;
+volatile float total_imu_angle = 0;
 // variables for odometry (matrix based)
 const Matrix<4,4> id_matrix = {   //identity matrix
    1, 0, 0, 0,
@@ -78,9 +81,9 @@ const Matrix<4,4> left_delta_matrix = {   //delta matrix for left wheel
    0, 0, 0, 1};
 const Matrix<4,4> left_full_matrix = left_angle_matrix * left_delta_matrix;   //combination of both left wheel matrices
 Matrix<4,4> TGR = id_matrix;    //matrix for robot's position and angle (global to robot)
-volatile double matrix_delta_x = 0;   //delta x prime found using the matrix method (TGR[0][4])
-volatile double matrix_delta_y = 0;   //delta y prime found using the matrix method (TGR[1][4])
-volatile double matrix_z_angle = 0;   //current z angle after using inverse trig of a value in the rotation matrix of TGR (radians)
+volatile float matrix_delta_x = 0;   //delta x prime found using the matrix method (TGR[0][4])
+volatile float matrix_delta_y = 0;   //delta y prime found using the matrix method (TGR[1][4])
+volatile float cur_theta = 0;   //current z angle after using inverse trig of a value in the rotation matrix of TGR (radians)
 // PWM variables for setting the motors' speeds
 volatile int Mr = 0;
 volatile int Ml = 0;
@@ -88,9 +91,9 @@ volatile int correct_theta = 0;
 // variables for finding current speed of robot, found via IR interrupts
 // do not need two sets of variables for each wheel since this speed
 // is only used when angle is already correct and now moving forward
-volatile unsigned long cur_speed = 0;  // current forward speed of robot (rad/ms)
-volatile unsigned long tprev = 0;
-volatile unsigned long tcur = 0;
+volatile float cur_speed = 0;  // current forward speed of robot (rad/ms)
+volatile float tprev = 0;
+volatile float tcur = 0;
 
 
 
@@ -103,6 +106,7 @@ void setup() {
 }
 
 void loop() {
+  CheckAP();   // See if device connects
   CheckIMU();  // Check for data from IMU
   CheckUDP();  // Get data structure from UDP (v, theta)
   correct_theta = SetDir();
@@ -114,6 +118,8 @@ void loop() {
     Ml = 0;
   }
   UpdateMotors();
+  matrix_delta_x = TGR(0,3);
+  matrix_delta_x = TGR(1,3);
 }
 
 
@@ -180,43 +186,138 @@ void SetIMU(){
   Wire.begin();
   compass.init();
   compass.enableDefault();
+  // values found via running the Calibration example in the library
+  compass.m_min = (LSM303::vector<int16_t>){-5818, -2600, -4703};
+  compass.m_max = (LSM303::vector<int16_t>){-1169, +2329, +647};
 }
 
+
+// connect device to AP mode
+void CheckAP(){
+  // compare the previous status to the current status
+  if (status != WiFi.status()) {
+    // it has changed update the variable
+    status = WiFi.status();
+
+    if (status == WL_AP_CONNECTED) {
+      byte remoteMac[6];
+
+      // a device has connected to the AP
+      Serial.print("Device connected to AP, MAC address: ");
+      WiFi.APClientMacAddress(remoteMac);
+    } else {
+      // a device has disconnected from the AP, and we are back in listening mode
+      Serial.println("Device disconnected from AP");
+    }
+  }
+}
 
 
 // checking data from IMU to see if robot is picked up
 void CheckIMU(){
   compass.read();
-  if (-8 < compass.a.z){
+  // IMU specs specify to drop 4 last bits, leaving us with mg
+  // divide by 1000 to turn it into g
+  int mgs = compass.a.z >> 4;
+  float realgs = (float)((float)mgs/1000);
+  // check if acceleration goes past a threshold, signalling
+  // it has been picked up
+  if (0.9 > realgs){
     pickedup = 1;
   }
+
+  cur_imu_angle = compass.heading();
+  total_imu_angle = (0.75*cur_imu_angle) + (0.25*prev_imu_angle);
+  prev_imu_angle = cur_imu_angle;
 }
 
 
 // getting data from UDP if there is any
 void CheckUDP(){
+  // if there's data available, read a packet
   int packetSize = Udp.parsePacket();
-  if (packetSize){
-    int len = Udp.read(packetBuffer, sizeof(packetBuffer));
-    a.v = byte(packetBuffer[0]);
-    a.theta = byte(packetBuffer[1]);
-    memset(packetBuffer, 0, sizeof(packetBuffer));
+  if (packetSize)
+  {
+    Serial.print("Received packet of size ");
+    Serial.println(packetSize);
+    Serial.print("From ");
+    IPAddress remoteIp = Udp.remoteIP();
+    Serial.print(remoteIp);
+    Serial.print(", port ");
+    Serial.println(Udp.remotePort());
+
+    // read the packet into packetBufffer
+    int len = Udp.read(packetBuffer, 255);
+    if (len > 0) packetBuffer[len] = 0;
+    Serial.println("Contents:");
+    Serial.println(packetBuffer);
+    char curch = 'n';
+    int i = 0;
+    String inString = packetBuffer;
+    String vString = "";
+    String thetaString = "";
+    int dotfound = 0;
+    while ((curch!='b') || (curch!='q')){
+      curch = inString[i];
+      Serial.print(curch);
+      Serial.print("\n");
+      if ('a' == curch){
+        Serial.print("Found a!\n");
+        dotfound = 1;
+      }
+      else if (0 == dotfound){
+        vString += curch;
+      }
+      else{
+        thetaString += curch;
+      }
+      i++;
+    }
+    // sends odometry data back to Pi
+    if ('q' == curch){
+      String xString = String(matrix_delta_x);
+      String yString = String(matrix_delta_y);
+      String zString = String(cur_theta);
+      String outString = "x: "+xString+"  y: "+yString+"  theta: "+zString+"\n";
+      char ReplyBuffer[1024];
+      outString.toCharArray(ReplyBuffer, 1024);
+      Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
+      Udp.write(ReplyBuffer);
+      Udp.endPacket();
+    }
+    a.v = vString.toInt();
+    a.theta = thetaString.toInt();
+    Serial.print("a.v = ");
+    Serial.print(a.v);
+    Serial.print("\n");
+    Serial.print("a.theta = ");
+    Serial.print(a.theta);
+    Serial.print("\n");
   }
 }
 
 
 // setting z angle of robot
+// outputs 1 when looking in correct direction
 int SetDir(){
-  int cur_theta = acos(TGR(0,0));
-  if(cur_theta < a.theta - 1){  // +/-1 a small range of acceptable angles
-    Mr = TURN_SPEED;            // for the robot to be facing, this way it system
-    Ml = 0;                     // isn't constantly currecting its z-angle and never
-    return 0;                   // allowing the robot to move forward.
+  float cur_enc_theta = (acos(TGR(0,0))*(180/PI));
+  if (0 > cur_enc_theta){
+    cur_enc_theta = 360 - cur_enc_theta;
   }
-  if(cur_theta > a.theta + 1){
+  cur_theta = (0.4*cur_enc_theta)+(0.6*total_imu_angle);
+  if(cur_theta < ((float)a.theta - 1)){  // +/-1 a small range of acceptable angles
+    Mr = TURN_SPEED;                     // for the robot to be facing, this way it system
+    Ml = 0;                              // isn't constantly currecting its z-angle and never
+    return 0;                            // allowing the robot to move forward.
+    tcur = 0;
+    tprev = 0;
+  }
+  if(cur_theta > ((float)a.theta + 1)){
     Mr = 0;
     Ml = TURN_SPEED;
     return 0;
+    tcur = 0;
+    tprev = 0;
   }
   tprev = millis(); // now that we are facing the right dirrect, start
   return 1;         // timer for calculating speed
@@ -224,10 +325,11 @@ int SetDir(){
 
 
 // setting the speed of the motors when moving forward
+// only occurs once facing the correct direction
 void SetSpeed(){
   // current speed is in rad/ms. /1000 to make it rad/s, /60 to rad/m, then ratio to be percentage
-  int speed_perc = cur_speed/(60*1000*(PERC_TO_RPM));
-  int speed_delta = a.v - speed_perc;
+  float speed_perc = (float)cur_speed/(60*1000*(PERC_TO_RPM));
+  int speed_delta = (int)(a.v - speed_perc);
   Mr = Mr + (speed_delta * KP * PERC_TO_PWM);  // remember, analogWrite input is 0-255
   Ml = Ml + (speed_delta * KP * PERC_TO_PWM);
   if (Mr > 255){
@@ -251,8 +353,8 @@ void UpdateMotors(){
   analogWrite(MOTOR_R_1, Mr);
   analogWrite(MOTOR_R_2, 0);
   // left motor
-  analogWrite(MOTOR_R_1, Ml);
-  analogWrite(MOTOR_R_2, 0);
+  analogWrite(MOTOR_L_1, Ml);
+  analogWrite(MOTOR_L_2, 0);
 }
 
 
