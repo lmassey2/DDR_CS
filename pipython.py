@@ -2,6 +2,7 @@ import socket
 import time
 import sys
 
+UDP_HOME = "127.0.0.1"
 UDP_IP = "192.168.1.1"
 UDP_PORT = 5000
 
@@ -12,6 +13,7 @@ MAX_V = 100
 v = 0
 theta = 0
 time_to_send = 0
+get_data = 0
 endloop = 0
 
 print "UDP target IP:", UDP_IP
@@ -25,6 +27,9 @@ while(0==endloop):
 		time_to_send = 1
 	if ("e" == keypress):
 		v = v-5
+		time_to_send = 1
+	if (" " == keypress):       # SPACE should stop the robot
+		v = MIN_V
 		time_to_send = 1
 	if ( MIN_V > v):
 		v = MIN_V
@@ -42,7 +47,10 @@ while(0==endloop):
 	if ("f" == keypress):
 		theta = 90
 		time_to_send = 1
-	if ("p"== keypress):
+	if ("q" == keypress):		# q requests odometry data
+		time_to_send = 1
+		get_data =1
+	if ("p"== keypress):		# p ends python script
 		endloop = 1
 	
 	# turn the integers into a string to be send to the robot
@@ -50,11 +58,23 @@ while(0==endloop):
 	# to know which integer goes to which variable in the c struct it has
 	vString = str(v)
 	thetaString = str(theta)
+	if (1 == get_data):
+		MESSAGE = vString + 'a' + thetaString + 'q'
 	MESSAGE = vString + 'a' + thetaString + 'b'
 
 	# only send when the desired values are changed by user
 	if (1 == time_to_send):
 		print "Sending..."
-		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
+		sock = socket.socket(socket.AF_INET, # Internet
+                     socket.SOCK_DGRAM) # UDP
 		sock.sendto(MESSAGE, (UDP_IP, UDP_PORT))
-		time_to_send = 0
+		sock.close()
+		time_to_send = 0;
+	if (1 == get_data):
+		sock = socket.socket(socket.AF_INET, # Internet
+                     socket.SOCK_DGRAM) # UDP
+		sock.bind((UDP_HOME, UDP_PORT))
+		data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
+		print data
+		sock.close()
+		get_data = 0
