@@ -22,17 +22,17 @@ using namespace BLA;
 #define GEAR_RATIO 75.81    //gear ratio of motor
 #define DELTA_THETA_R ((2*PI/TICKS)/GEAR_RATIO)   //radians wheel travels per tick
 #define PT (WHEEL_R*DELTA_THETA_R)    //distance wheel travels per tick
-#define PHI (atan2(PT, BASE_L)*(180/PI))   //angle change of robot per tick (degrees)
+#define PHI atan2(PT, BASE_L)   //angle change of robot per tick (rads)
 #define MAX_RPM 180           // maximum RPM of the motor
 #define RPM_TO_PWM 1.417      // ratio of max RPM to max PWM
 #define PERC_TO_RPM 1.8       // ration of max percentage to max RPM 
 #define PERC_TO_PWM 2.55    // ration of max percentage to max PWM
-#define TURN_SPEED 127      // speed (in terms of PWM) a wheel will turn to change theta
-#define KP 5                  // proportional gain for the closed-loop system for speed of robot 
+#define TURN_SPEED 255      // speed (in terms of PWM) a wheel will turn to change theta
+#define KP 10                  // proportional gain for the closed-loop system for speed of robot 
 // variables for Wifi //
-static char ssid[] = "";    // your network SSID (name)
-static char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
-static int keyIndex = 0;    // your network key Index number (needed only for WEP)
+char ssid[] = "FeatherThyme";        // your network SSID (name)
+char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
+int keyIndex = 0;                // your network key Index number (needed only for WEP)
 int status = WL_IDLE_STATUS;
 // structure for speed and angle of robot
 struct Velocity {
@@ -52,6 +52,8 @@ int pickedup = 0;
 volatile float prev_imu_angle = 0;
 volatile float cur_imu_angle = 0;
 volatile float total_imu_angle = 0;
+float starting_theta;
+float starting_rad;
 // variables for odometry (matrix based)
 const Matrix<4,4> id_matrix = {   //identity matrix
    1, 0, 0, 0,
@@ -92,17 +94,39 @@ volatile int correct_theta = 0;
 // do not need two sets of variables for each wheel since this speed
 // is only used when angle is already correct and now moving forward
 volatile float cur_speed = 0;  // current forward speed of robot (rad/ms)
-volatile float tprev = 0;
+volatile float tprev = 0;     // times used for knowing current speed
 volatile float tcur = 0;
-
+// timers for when to set odometry matrix angle equal to IMU angle, to reduce error
+volatile float tick;
+volatile float tock;
 
 
 void setup() {
   APMode();  // Settup uC as an access point for the pi
   Udp.begin(localPort);  // Open the ports needed for UDP messages
-  InitStructs();  // Initialize data structures
   InitPins();  // Settup the pins needed for each component
   SetIMU();  // Establish connection with IMU
+  Serial.print("Before\n");
+  Serial.print(TGR(0,0));
+  Serial.print("\n");
+  Serial.print(TGR(0,1));
+  Serial.print("\n");
+  Serial.print(TGR(0,2));
+  Serial.print("\n");
+  Serial.print(TGR(0,3));
+  Serial.print("\n");
+  InitStructs();  // Initialize data structures
+  Serial.print("After\n");
+  Serial.print(TGR(0,0));
+  Serial.print("\n");
+  Serial.print(TGR(0,1));
+  Serial.print("\n");
+  Serial.print(TGR(0,2));
+  Serial.print("\n");
+  Serial.print(TGR(0,3));
+  Serial.print("\n");
+  Serial.print("Setup Complete!\n");
+  tick = millis();
 }
 
 void loop() {
@@ -114,12 +138,22 @@ void loop() {
     SetSpeed();
   }
   if (pickedup){  // If CheckIMU() found that the robot was
+    Serial.print("Picked up! Stopping!\n");
     Mr = 0;               // picked up, stop the motors
     Ml = 0;
   }
   UpdateMotors();
   matrix_delta_x = TGR(0,3);
   matrix_delta_x = TGR(1,3);
+  tock = millis();
+  // every second make odometry angle equal IMU angle
+  if (1000 < (tock-tick)){
+    TGR(0,0) = cos(total_imu_angle*PI/180);
+    TGR(0,1) = -sin(total_imu_angle*PI/180);
+    TGR(1,0) = sin(total_imu_angle*PI/180);
+    TGR(1,1) = cos(total_imu_angle*PI/180);
+    tick = millis();
+  }
 }
 
 
@@ -161,34 +195,51 @@ void APMode(){
 }
 
 
-// initialize structures
+// initialize structures and variables
 void InitStructs(){
+  Serial.print("Initializing Structs...\n");
   a.v = 0;
   a.theta = 0;
+  compass.read();
+  starting_theta = compass.heading();
+  Serial.print("Starting Angle = ");
+  Serial.print(starting_theta);
+  Serial.print("\n");
+  cur_theta = starting_theta;
+  prev_imu_angle = starting_theta;
+  starting_rad = starting_theta*PI/180;
+  TGR(0,0) = cos(starting_rad);
+  TGR(0,1) = -sin(starting_rad);
+  TGR(1,0) = sin(starting_rad);
+  TGR(1,1) = cos(starting_rad);
 }
 
 
 // initialize the pins for every component being used
 void InitPins(){
+  Serial.print("Initializing Pins...\n");
   pinMode(MOTOR_R_1, OUTPUT);
   pinMode(MOTOR_R_2, OUTPUT);
   pinMode(MOTOR_L_1, OUTPUT);
   pinMode(MOTOR_L_2, OUTPUT);
   pinMode(IRPIN_R, INPUT);
   pinMode(IRPIN_L, INPUT);
-  attachInterrupt(IRPIN_R, rightISR, RISING);
-  attachInterrupt(IRPIN_L, leftISR, RISING);
+  attachInterrupt(IRPIN_R, rightISR, FALLING);
+  attachInterrupt(IRPIN_L, leftISR, FALLING);
+  digitalWrite(IRPIN_R, LOW);
+  digitalWrite(IRPIN_L, LOW);
 }
 
 
 // initialize what is needed for IMU
 void SetIMU(){
+  Serial.print("Initializing IMU...\n");
   Wire.begin();
   compass.init();
   compass.enableDefault();
   // values found via running the Calibration example in the library
-  compass.m_min = (LSM303::vector<int16_t>){-5818, -2600, -4703};
-  compass.m_max = (LSM303::vector<int16_t>){-1169, +2329, +647};
+  compass.m_min = (LSM303::vector<int16_t>){-2317, -5867, -3964};
+  compass.m_max = (LSM303::vector<int16_t>){+3814, +626, +4179};
 }
 
 
@@ -256,34 +307,33 @@ void CheckUDP(){
     String inString = packetBuffer;
     String vString = "";
     String thetaString = "";
-    int dotfound = 0;
-    while ((curch!='b') || (curch!='q')){
+    int afound = 0;
+    int bfound = 0;
+    int qfound = 0;
+    while (0==bfound){
       curch = inString[i];
       Serial.print(curch);
       Serial.print("\n");
       if ('a' == curch){
         Serial.print("Found a!\n");
-        dotfound = 1;
+        afound = 1;
       }
-      else if (0 == dotfound){
+      else if ('b' == curch){
+        Serial.print("Found b!\n");
+        bfound = 1;
+      }
+      else if ('q' == curch){
+        qfound = 1;
+        bfound = 1;
+        Serial.print("Found q!\n");
+      }
+      else if (0 == afound){
         vString += curch;
       }
       else{
         thetaString += curch;
       }
       i++;
-    }
-    // sends odometry data back to Pi
-    if ('q' == curch){
-      String xString = String(matrix_delta_x);
-      String yString = String(matrix_delta_y);
-      String zString = String(cur_theta);
-      String outString = "x: "+xString+"  y: "+yString+"  theta: "+zString+"\n";
-      char ReplyBuffer[1024];
-      outString.toCharArray(ReplyBuffer, 1024);
-      Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-      Udp.write(ReplyBuffer);
-      Udp.endPacket();
     }
     a.v = vString.toInt();
     a.theta = thetaString.toInt();
@@ -292,6 +342,15 @@ void CheckUDP(){
     Serial.print("\n");
     Serial.print("a.theta = ");
     Serial.print(a.theta);
+    Serial.print("\n");
+    Serial.print("x = ");
+    Serial.print(matrix_delta_x);
+    Serial.print("   ");
+    Serial.print("y = ");
+    Serial.print(matrix_delta_y);
+    Serial.print("   ");
+    Serial.print("theta = ");
+    Serial.print(cur_theta);
     Serial.print("\n");
   }
 }
@@ -302,17 +361,17 @@ void CheckUDP(){
 int SetDir(){
   float cur_enc_theta = (acos(TGR(0,0))*(180/PI));
   if (0 > cur_enc_theta){
-    cur_enc_theta = 360 - cur_enc_theta;
+    cur_enc_theta = 360 + cur_enc_theta;
   }
   cur_theta = (0.4*cur_enc_theta)+(0.6*total_imu_angle);
-  if(cur_theta < ((float)a.theta - 1)){  // +/-1 a small range of acceptable angles
+  if(cur_theta < ((float)a.theta - 2)){  // +/-2 a small range of acceptable angles
     Mr = TURN_SPEED;                     // for the robot to be facing, this way it system
     Ml = 0;                              // isn't constantly currecting its z-angle and never
     return 0;                            // allowing the robot to move forward.
     tcur = 0;
     tprev = 0;
   }
-  if(cur_theta > ((float)a.theta + 1)){
+  if(cur_theta > ((float)a.theta + 2)){
     Mr = 0;
     Ml = TURN_SPEED;
     return 0;
