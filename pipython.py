@@ -14,6 +14,7 @@ MAX_V = 100
 v = 0
 theta = 0
 time_to_send = 0
+time_to_reset = 0
 get_data = 0
 endloop = 0
 
