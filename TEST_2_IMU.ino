@@ -81,10 +81,10 @@ void loop() {
     a.theta = 180;
   }
   else if (3==facing){         // face east
-    a.theta = 270;
+    a.theta = 90;
   }
   else if (4==facing){         // face west
-    a.theta = 90;
+    a.theta = 270;
   }
   else{
     all_done = 1;

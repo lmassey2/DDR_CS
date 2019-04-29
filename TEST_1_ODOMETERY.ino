@@ -3,6 +3,8 @@
  *  turn, moving another 50cm forward, now on the global y-axis, finally printing
  *  out current odometry to the Raspberry Pi.
  *  NOTE: this does not use the IMU, as requested.
+ *  NOTE: distances changed to 20cm each as there is currently not
+ *        a flat area with 50x50cm of space
  */
 
 #include <BasicLinearAlgebra.h>
@@ -98,7 +100,7 @@ volatile float cur_speed = 0;  // current forward speed of robot (rad/ms)
 volatile float tprev = 0;     // times used for knowing current speed
 volatile float tcur = 0;
 // distance and angle the robot must move for the test, with state variables
-#define GO_DIST 5000     // supposed to be 50cm(500mm), but the interrupts for the IR
+#define GO_DIST 2000     // supposed to be 20cm(200mm), but the interrupts for the IR
 #define FIRST_ANGLE 0    // sensors are occuring more than expected no matter what sensity
 #define SECOND_ANGLE 270 // the are at.
 #define GO_SPEED 100     // percentage of max speed of PWM that can be applied to the motors
@@ -117,9 +119,9 @@ void setup() {
   InitPins();  // Settup the pins needed for each component
   InitStructs();  // Initialize data structures
   Serial.print("Setup Complete!\n");
-  Serial.println(PT);
+  /*Serial.println(PT);
   Serial.println(PHI);
-  /*Serial.println("right matrix = ");
+  Serial.println("right matrix = ");
   Serial.print(right_full_matrix(0,0));
   Serial.print("  ");
   Serial.print(right_full_matrix(0,1));
@@ -238,9 +240,9 @@ void APMode(){
   WiFi.setPins(8,7,4,2);
   //Initialize serial and wait for port to open:
   Serial.begin(9600);
-  while (!Serial) {
+  /*while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
-  }
+  }*/
   Serial.println("Access Point Mode");
   // check for the presence of the shield:
   if (WiFi.status() == WL_NO_SHIELD) {
