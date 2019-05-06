@@ -2,9 +2,10 @@ import socket
 import time
 import sys
 
-UDP_HOME = "127.0.0.1"
+UDP_HOME = ""
 UDP_IP = "192.168.1.1"
-UDP_PORT = 5000
+SEND_UDP_PORT = 5000
+RECV_UDP_PORT = 5005
 
 MIN_V = 0
 MAX_V = 100
@@ -13,11 +14,16 @@ MAX_V = 100
 v = 0
 theta = 0
 time_to_send = 0
+time_to_reset = 0
 get_data = 0
 endloop = 0
 
-print "UDP target IP:", UDP_IP
-print "UDP target port:", UDP_PORT
+sendsock = socket.socket(socket.AF_INET, # Internet
+			socket.SOCK_DGRAM) # UDP
+
+recvsock = socket.socket(socket.AF_INET, # Internet
+			socket.SOCK_DGRAM) # UDP
+recvsock.bind((UDP_HOME, RECV_UDP_PORT))
 
 while(0==endloop):
 	keypress = raw_input("Press ONE key!: ")
@@ -50,31 +56,35 @@ while(0==endloop):
 	if ("q" == keypress):		# q requests odometry data
 		time_to_send = 1
 		get_data =1
-	if ("p"== keypress):		# p ends python script
+	if ("r" == keypress):		# r resets robot, useful after being picked ip
+		time_to_send = 1
+		time_to_reset = 1
+		v = 0
+		theta = 0
+	if ("p" == keypress):		# p ends python script
 		endloop = 1
 	
 	# turn the integers into a string to be send to the robot
-	# characters a and b are parsing and stoping characters for the microcontroler
+	# characters a and b,q,r are parsing and stoping characters for the microcontroler
 	# to know which integer goes to which variable in the c struct it has
 	vString = str(v)
 	thetaString = str(theta)
+	MESSAGE = vString + 'a' + thetaString + 'b'
 	if (1 == get_data):
 		MESSAGE = vString + 'a' + thetaString + 'q'
-	MESSAGE = vString + 'a' + thetaString + 'b'
+	if (1 == time_to_reset):
+		v = 0
+		theta = 0;
+		MESSAGE = vString + 'a' + thetaString + 'r'
+		time_to_reset = 0
+
 
 	# only send when the desired values are changed by user
 	if (1 == time_to_send):
 		print "Sending..."
-		sock = socket.socket(socket.AF_INET, # Internet
-                     socket.SOCK_DGRAM) # UDP
-		sock.sendto(MESSAGE, (UDP_IP, UDP_PORT))
-		sock.close()
+		sendsock.sendto(MESSAGE, (UDP_IP, SEND_UDP_PORT))
 		time_to_send = 0;
 	if (1 == get_data):
-		sock = socket.socket(socket.AF_INET, # Internet
-                     socket.SOCK_DGRAM) # UDP
-		sock.bind((UDP_HOME, UDP_PORT))
-		data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
+		data, addr = recvsock.recvfrom(256) # buffer size is 1024 bytes
 		print data
-		sock.close()
 		get_data = 0
