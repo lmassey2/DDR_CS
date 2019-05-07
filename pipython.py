@@ -92,10 +92,10 @@ while(0==endloop):
 		v = v-10
 		time_to_send = 1
 	elif (curses.KEY_LEFT == keypress):
-		theta = theta + 10
+		theta = theta + 15
 		time_to_send = 1
 	elif (curses.KEY_RIGHT == keypress):
-		theta = theta - 10
+		theta = theta - 15
 		time_to_send = 1
 	elif (ord(' ') == keypress):
 		v = MIN_V
