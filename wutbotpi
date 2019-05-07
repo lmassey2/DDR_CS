@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#!/bin/bash
-
 #Copyright <2019> <LIAM R. MASSEY>
 #
 #Redistribution and use in source and binary forms, with or without modification, are permitted 
@@ -31,6 +29,6 @@ PY_FILE=pipython.py
 
 echo 'Executing W.U.T. Bot Python controller...'
 
-python $INSTALL_DIR/PY_FILE
+python $INSTALL_DIR/$PY_FILE
 
 exit 0
