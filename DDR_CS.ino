@@ -1,3 +1,32 @@
+//////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+//Copyright <2019> <LIAM R. MASSEY>//
+
+Redistribution and use in source and binary forms, with or without modification, are permitted 
+provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions 
+and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of 
+conditions and the following disclaimer in the documentation and/or other materials provided with 
+the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to 
+endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR 
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND 
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR 
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL 
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER 
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT 
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 #include <BasicLinearAlgebra.h>
 using namespace BLA;
 #include <math.h>
@@ -11,8 +40,8 @@ using namespace BLA;
 //pin definitions
 #define MOTOR_R_1 5   // right motor's h-bridge PWM
 #define MOTOR_R_2 6
-#define MOTOR_L_1 12  // left motor
-#define MOTOR_L_2 13
+#define MOTOR_L_1 13  // left motor
+#define MOTOR_L_2 12
 #define IRPIN_R 10
 #define IRPIN_L 11
 //constants for robot dimensions
@@ -39,19 +68,28 @@ struct Velocity {
   int v;
   int theta;
 };
+// structure for what is sent back to the Pi
+struct __attribute__((__packed__)) Backmsg {
+  double odo[3];
+  double imu[6];
+  double heading;
+};
 // initializing structs
 struct Velocity a;
+struct Backmsg response;
 // variables for UDP
-unsigned int localPort = 5000;      // local port to listen on
+unsigned int recvPort = 5000;      // local port to listen on
+unsigned int sendPort = 4242;
 char packetBuffer[255]; //buffer to hold incoming packet
-WiFiUDP Udp;
+WiFiUDP RecvUdp;
+WiFiUDP SendUdp;
+IPAddress sendIP(192,168,1,100);
 // variables for IMU
 #define MAG_RATIO 0.160  // magnetometer ratio in spec sheet
+#define GRAV_ACC  9.81   // m/s^2 of gravity
 LSM303 compass;
 int pickedup = 0;
-volatile float prev_imu_angle = 0;
 volatile float cur_imu_angle = 0;
-volatile float total_imu_angle = 0;
 float starting_theta;
 float starting_rad;
 // variables for odometry (matrix based)
@@ -85,7 +123,7 @@ const Matrix<4,4> left_full_matrix = left_angle_matrix * left_delta_matrix;   //
 Matrix<4,4> TGR = id_matrix;    //matrix for robot's position and angle (global to robot)
 volatile float matrix_delta_x = 0;   //delta x prime found using the matrix method (TGR[0][4])
 volatile float matrix_delta_y = 0;   //delta y prime found using the matrix method (TGR[1][4])
-volatile float cur_theta = 0;   //current z angle after using inverse trig of a value in the rotation matrix of TGR (radians)
+volatile float cur_theta = 0;   //current z angle after using inverse trig of a value in the rotation matrix of TGR (degrees)
 // PWM variables for setting the motors' speeds
 volatile int Mr = 0;
 volatile int Ml = 0;
@@ -103,28 +141,11 @@ volatile float tock;
 
 void setup() {
   APMode();  // Settup uC as an access point for the pi
-  Udp.begin(localPort);  // Open the ports needed for UDP messages
+  RecvUdp.begin(recvPort);  // Open the ports needed for UDP messages
+  SendUdp.begin(sendPort);
   InitPins();  // Settup the pins needed for each component
   SetIMU();  // Establish connection with IMU
-  Serial.print("Before\n");
-  Serial.print(TGR(0,0));
-  Serial.print("\n");
-  Serial.print(TGR(0,1));
-  Serial.print("\n");
-  Serial.print(TGR(0,2));
-  Serial.print("\n");
-  Serial.print(TGR(0,3));
-  Serial.print("\n");
   InitStructs();  // Initialize data structures
-  Serial.print("After\n");
-  Serial.print(TGR(0,0));
-  Serial.print("\n");
-  Serial.print(TGR(0,1));
-  Serial.print("\n");
-  Serial.print(TGR(0,2));
-  Serial.print("\n");
-  Serial.print(TGR(0,3));
-  Serial.print("\n");
   Serial.print("Setup Complete!\n");
   tick = millis();
 }
@@ -138,22 +159,22 @@ void loop() {
     SetSpeed();
   }
   if (pickedup){  // If CheckIMU() found that the robot was
-    Serial.print("Picked up! Stopping!\n");
     Mr = 0;               // picked up, stop the motors
     Ml = 0;
   }
   UpdateMotors();
   matrix_delta_x = TGR(0,3);
-  matrix_delta_x = TGR(1,3);
+  matrix_delta_y = TGR(1,3);
   tock = millis();
   // every second make odometry angle equal IMU angle
   if (1000 < (tock-tick)){
-    TGR(0,0) = cos(total_imu_angle*PI/180);
-    TGR(0,1) = -sin(total_imu_angle*PI/180);
-    TGR(1,0) = sin(total_imu_angle*PI/180);
-    TGR(1,1) = cos(total_imu_angle*PI/180);
+    TGR(0,0) = cos(cur_imu_angle*PI/180);
+    TGR(0,1) = -sin(cur_imu_angle*PI/180);
+    TGR(1,0) = sin(cur_imu_angle*PI/180);
+    TGR(1,1) = cos(cur_imu_angle*PI/180);
     tick = millis();
   }
+  UpdateMsg();
 }
 
 
@@ -163,9 +184,6 @@ void APMode(){
   WiFi.setPins(8,7,4,2);
   //Initialize serial and wait for port to open:
   Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
   Serial.println("Access Point Mode");
   // check for the presence of the shield:
   if (WiFi.status() == WL_NO_SHIELD) {
@@ -206,7 +224,7 @@ void InitStructs(){
   Serial.print(starting_theta);
   Serial.print("\n");
   cur_theta = starting_theta;
-  prev_imu_angle = starting_theta;
+  cur_imu_angle = starting_theta;
   starting_rad = starting_theta*PI/180;
   TGR(0,0) = cos(starting_rad);
   TGR(0,1) = -sin(starting_rad);
@@ -273,32 +291,32 @@ void CheckIMU(){
   float realgs = (float)((float)mgs/1000);
   // check if acceleration goes past a threshold, signalling
   // it has been picked up
-  if (0.9 > realgs){
+  if (0.7 > realgs){
     pickedup = 1;
+    Serial.print("Picked up! Stopping!\n");
   }
 
   cur_imu_angle = compass.heading();
-  total_imu_angle = (0.75*cur_imu_angle) + (0.25*prev_imu_angle);
-  prev_imu_angle = cur_imu_angle;
 }
 
 
 // getting data from UDP if there is any
 void CheckUDP(){
   // if there's data available, read a packet
-  int packetSize = Udp.parsePacket();
+  int packetSize = RecvUdp.parsePacket();
   if (packetSize)
   {
     Serial.print("Received packet of size ");
     Serial.println(packetSize);
     Serial.print("From ");
-    IPAddress remoteIp = Udp.remoteIP();
+    IPAddress remoteIp = RecvUdp.remoteIP();
     Serial.print(remoteIp);
     Serial.print(", port ");
-    Serial.println(Udp.remotePort());
+    Serial.println(RecvUdp.remotePort());
 
     // read the packet into packetBufffer
-    int len = Udp.read(packetBuffer, 255);
+    int len = RecvUdp.read(packetBuffer, 255);
+    sendIP = RecvUdp.remoteIP();
     if (len > 0) packetBuffer[len] = 0;
     Serial.println("Contents:");
     Serial.println(packetBuffer);
@@ -307,8 +325,8 @@ void CheckUDP(){
     String inString = packetBuffer;
     String vString = "";
     String thetaString = "";
-    int afound = 0;
-    int bfound = 0;
+    int afound = 0;       // is a char in between the two values of the struct
+    int bfound = 0;       // b, q, and r are ending chars for the messages   
     int qfound = 0;
     while (0==bfound){
       curch = inString[i];
@@ -327,6 +345,11 @@ void CheckUDP(){
         bfound = 1;
         Serial.print("Found q!\n");
       }
+      else if ('r' == curch){
+        pickedup = 0;
+        bfound = 1;
+        Serial.print("Found r!\n");
+      }
       else if (0 == afound){
         vString += curch;
       }
@@ -337,21 +360,18 @@ void CheckUDP(){
     }
     a.v = vString.toInt();
     a.theta = thetaString.toInt();
-    Serial.print("a.v = ");
-    Serial.print(a.v);
-    Serial.print("\n");
-    Serial.print("a.theta = ");
-    Serial.print(a.theta);
-    Serial.print("\n");
-    Serial.print("x = ");
-    Serial.print(matrix_delta_x);
-    Serial.print("   ");
-    Serial.print("y = ");
-    Serial.print(matrix_delta_y);
-    Serial.print("   ");
-    Serial.print("theta = ");
-    Serial.print(cur_theta);
-    Serial.print("\n");
+    // construct and send a response string based on the c struct
+    // turning the struct into a string is currently what makes the UDP
+    // message send properly from the microcontroller.
+    if (1==qfound){
+      String outString = String(response.odo[0])+" = x pos, "+String(response.odo[1])+" = y pos, "+String(response.odo[2])+" = z pos\n";
+      outString = outString+String(response.imu[0])+" = ax, "+String(response.imu[1])+" = ay, "+String(response.imu[2])+" = az, ";
+      outString = outString+String(response.imu[3])+" = mx, "+String(response.imu[4])+" = my, "+String(response.imu[5])+" = mz\n";
+      outString = outString+String(response.heading)+" = heading\n";
+      SendUdp.beginPacket(sendIP, sendPort);
+      SendUdp.print(outString);
+      SendUdp.endPacket();
+    }
   }
 }
 
@@ -360,18 +380,19 @@ void CheckUDP(){
 // outputs 1 when looking in correct direction
 int SetDir(){
   float cur_enc_theta = (acos(TGR(0,0))*(180/PI));
+  // convert +/- 180 degrees --> 0 to 360 degrees
   if (0 > cur_enc_theta){
     cur_enc_theta = 360 + cur_enc_theta;
   }
-  cur_theta = (0.4*cur_enc_theta)+(0.6*total_imu_angle);
-  if(cur_theta < ((float)a.theta - 2)){  // +/-2 a small range of acceptable angles
+  cur_theta = cur_imu_angle;
+  if(cur_theta < ((float)a.theta - 1)){  // +/-1 a small range of acceptable angles
     Mr = TURN_SPEED;                     // for the robot to be facing, this way it system
     Ml = 0;                              // isn't constantly currecting its z-angle and never
     return 0;                            // allowing the robot to move forward.
     tcur = 0;
     tprev = 0;
   }
-  if(cur_theta > ((float)a.theta + 2)){
+  if(cur_theta > ((float)a.theta + 1)){
     Mr = 0;
     Ml = TURN_SPEED;
     return 0;
@@ -414,6 +435,32 @@ void UpdateMotors(){
   // left motor
   analogWrite(MOTOR_L_1, Ml);
   analogWrite(MOTOR_L_2, 0);
+}
+
+// updates the UDP response of data to the Pi
+void UpdateMsg(){
+  response.odo[0] = (double)TGR(0,3);
+  response.odo[1] = (double)TGR(1,3);
+  response.odo[2] = (double)TGR(2,3);
+  // IMU specs specify to drop 4 last bits, leaving us with mg
+  // divide by 1000 to turn it into g
+  int xmgs = compass.a.x >> 4;
+  int ymgs = compass.a.y >> 4;
+  int zmgs = compass.a.z >> 4;
+  float xrealgs = (float)((float)xmgs/1000);
+  float yrealgs = (float)((float)ymgs/1000);
+  float zrealgs = (float)((float)zmgs/1000);
+  // multiply by 9.81m/s^2 to get readable acceleration values
+  response.imu[0] = (double)xrealgs * GRAV_ACC;
+  response.imu[1] = (double)yrealgs * GRAV_ACC;
+  response.imu[2] = (double)zrealgs * GRAV_ACC;
+  // magnetometer readings come in as milligauss multiplied by a conversion factor
+  // to go from gauss to degrees must use inverse tangent, so the conversion factor
+  // is not needed as it would be cancelled out in the division within the trig
+  response.imu[3] = atan2(compass.m.y, compass.m.z) * (180/PI);
+  response.imu[4] = atan2(compass.m.x, compass.m.z) * (180/PI);
+  response.imu[5] = atan2(compass.m.x, compass.m.y) * (180/PI);
+  response.heading = (double)cur_imu_angle;
 }
 
 

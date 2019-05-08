@@ -1,15 +1,42 @@
+#Copyright <2019> <LIAM R. MASSEY>
+#
+#Redistribution and use in source and binary forms, with or without modification, are permitted 
+#provided that the following conditions are met:
+#
+#1. Redistributions of source code must retain the above copyright notice, this list of conditions 
+#and the following disclaimer.
+#
+#2. Redistributions in binary form must reproduce the above copyright notice, this list of 
+#conditions and the following disclaimer in the documentation and/or other materials provided with 
+#the distribution.
+#
+#3. Neither the name of the copyright holder nor the names of its contributors may be used to 
+#endorse or promote products derived from this software without specific prior written permission.
+#
+#THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR 
+#IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND 
+#FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR 
+#CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL 
+#DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
+#DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER 
+#IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT 
+#OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
 import socket
 import time
 import sys
+import curses
 
 UDP_HOME = ""
 UDP_IP = "192.168.1.1"
 SEND_UDP_PORT = 5000
-RECV_UDP_PORT = 5005
+RECV_UDP_PORT = 4242
 
 MIN_V = 0
 MAX_V = 100
-#Theta does not need min-max values as it can only be 1 of 4 values below
+MIN_THETA = 0
+MAX_THETA = 360
 
 v = 0
 theta = 0
@@ -25,45 +52,86 @@ recvsock = socket.socket(socket.AF_INET, # Internet
 			socket.SOCK_DGRAM) # UDP
 recvsock.bind((UDP_HOME, RECV_UDP_PORT))
 
-while(0==endloop):
-	keypress = raw_input("Press ONE key!: ")
+# get the curses screen window
+screen = curses.initscr()
 
-	if ("w" == keypress):		# w increases speed, e decreases speed.  both in increments of 5%
-		v = v+5
+# turn off input echoing
+curses.noecho()
+
+# respond to keys immediately (don't wait for enter)
+curses.cbreak()
+
+# map arrow keys to special values
+screen.keypad(True)
+
+print "///////////////////////////////////////////////////////////////////////////////////\n"
+print "Hello!  Welcome to the Wireless UDP Transport Robot, otherwise known as W.U.T. Bot.\n"
+print "///////////////////////////////////////////////////////////////////////////////////\n\n"
+print "Controls : \n"
+print "UP_ARROW - speed up\n"
+print "DOWN_ARROW - slow down\n"
+print "SPACE_BAR - stop\n"
+print "LEFT_ARROW - turn left 15 degrees\n"
+print "RIGHT_ARROW - turn right 15 degrees\n"
+print "w - face North\n"
+print "a - face West\n"
+print "s - face South\n"
+print "s - face East\n"
+print "q - display odometry data\n"
+print "r - reset after pickup\n"
+print "p - close this program\n\n"
+
+
+while(0==endloop):
+	keypress = screen.getch()
+
+	if (curses.KEY_UP == keypress):
+		v = v+10
 		time_to_send = 1
-	if ("e" == keypress):
-		v = v-5
+	elif (curses.KEY_DOWN == keypress):
+		v = v-10
 		time_to_send = 1
-	if (" " == keypress):       # SPACE should stop the robot
+	elif (curses.KEY_LEFT == keypress):
+		theta = theta + 15
+		time_to_send = 1
+	elif (curses.KEY_RIGHT == keypress):
+		theta = theta - 15
+		time_to_send = 1
+	elif (ord(' ') == keypress):
 		v = MIN_V
 		time_to_send = 1
-	if ( MIN_V > v):
-		v = MIN_V
-	if ( MAX_V < v):
-		v = MAX_V
-	if ("a" == keypress):       # a, s, d, e make the robot face North, East, South, and West respectively
-		theta = 0               # which is 0, 270, 180, 90 degrees in the robot's frame
+	elif (ord('w') == keypress):
+		theta = 0 
 		time_to_send = 1
-	if ("s" == keypress):
+	elif (ord('d') == keypress):
 		theta = 270
 		time_to_send = 1
-	if ("d" == keypress):
+	elif (ord('s') == keypress):
 		theta = 180
 		time_to_send = 1
-	if ("f" == keypress):
+	elif (ord('a') == keypress):
 		theta = 90
 		time_to_send = 1
-	if ("q" == keypress):		# q requests odometry data
+	elif (ord('q') == keypress):
 		time_to_send = 1
-		get_data =1
-	if ("r" == keypress):		# r resets robot, useful after being picked ip
+		get_data = 1
+	elif (ord('r') == keypress):
 		time_to_send = 1
 		time_to_reset = 1
 		v = 0
 		theta = 0
-	if ("p" == keypress):		# p ends python script
+	elif (ord('p') == keypress):
 		endloop = 1
-	
+		
+	if ( MIN_V > v):
+		v = MIN_V
+	elif ( MAX_V < v):
+		v = MAX_V
+	if ( MIN_THETA > theta):
+		theta = MIN_THETA
+	elif ( MAX_THETA < theta):
+		theta = MAX_THETA
+		
 	# turn the integers into a string to be send to the robot
 	# characters a and b,q,r are parsing and stoping characters for the microcontroler
 	# to know which integer goes to which variable in the c struct it has
@@ -85,6 +153,6 @@ while(0==endloop):
 		sendsock.sendto(MESSAGE, (UDP_IP, SEND_UDP_PORT))
 		time_to_send = 0;
 	if (1 == get_data):
-		data, addr = recvsock.recvfrom(256) # buffer size is 1024 bytes
+		data, addr = recvsock.recvfrom(1024) # buffer size is 1024 bytes
 		print data
 		get_data = 0
