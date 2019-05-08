@@ -92,10 +92,10 @@ while(0==endloop):
 		v = v-10
 		time_to_send = 1
 	elif (curses.KEY_LEFT == keypress):
-		theta = theta + 15
+		theta = theta - 15
 		time_to_send = 1
 	elif (curses.KEY_RIGHT == keypress):
-		theta = theta - 15
+		theta = theta + 15
 		time_to_send = 1
 	elif (ord(' ') == keypress):
 		v = MIN_V
@@ -104,13 +104,13 @@ while(0==endloop):
 		theta = 0 
 		time_to_send = 1
 	elif (ord('d') == keypress):
-		theta = 270
+		theta = 90
 		time_to_send = 1
 	elif (ord('s') == keypress):
 		theta = 180
 		time_to_send = 1
 	elif (ord('a') == keypress):
-		theta = 90
+		theta = 270
 		time_to_send = 1
 	elif (ord('q') == keypress):
 		time_to_send = 1
@@ -128,9 +128,9 @@ while(0==endloop):
 	elif ( MAX_V < v):
 		v = MAX_V
 	if ( MIN_THETA > theta):
-		theta = MIN_THETA
+		theta = MIN_THETA + theta
 	elif ( MAX_THETA < theta):
-		theta = MAX_THETA
+		theta = theta - MAX_THETA
 		
 	# turn the integers into a string to be send to the robot
 	# characters a and b,q,r are parsing and stoping characters for the microcontroler
