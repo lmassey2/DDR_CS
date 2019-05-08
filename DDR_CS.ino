@@ -56,8 +56,8 @@ using namespace BLA;
 #define RPM_TO_PWM 1.417      // ratio of max RPM to max PWM
 #define PERC_TO_RPM 1.8       // ration of max percentage to max RPM 
 #define PERC_TO_PWM 2.55    // ration of max percentage to max PWM
-#define TURN_SPEED 255      // speed (in terms of PWM) a wheel will turn to change theta
-#define KP 10                  // proportional gain for the closed-loop system for speed of robot 
+#define TURN_SPEED 200      // speed (in terms of PWM) a wheel will turn to change theta
+#define KP 0.5                 // proportional gain for the closed-loop system for speed of robot 
 // variables for Wifi //
 char ssid[] = "FeatherThyme";        // your network SSID (name)
 char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
@@ -127,6 +127,7 @@ volatile float cur_theta = 0;   //current z angle after using inverse trig of a 
 // PWM variables for setting the motors' speeds
 volatile int Mr = 0;
 volatile int Ml = 0;
+volatile int new_theta = 1;
 volatile int correct_theta = 0;
 // variables for finding current speed of robot, found via IR interrupts
 // do not need two sets of variables for each wheel since this speed
@@ -154,13 +155,15 @@ void loop() {
   CheckAP();   // See if device connects
   CheckIMU();  // Check for data from IMU
   CheckUDP();  // Get data structure from UDP (v, theta)
-  correct_theta = SetDir();
-  if (correct_theta){
-    SetSpeed();
-  }
   if (pickedup){  // If CheckIMU() found that the robot was
     Mr = 0;               // picked up, stop the motors
     Ml = 0;
+  }
+  else if (new_theta){
+    SetDir();    // turn if needed
+  }
+  else if (correct_theta){
+    SetSpeed();   // go forward once looking at correct angle
   }
   UpdateMotors();
   matrix_delta_x = TGR(0,3);
@@ -256,8 +259,8 @@ void SetIMU(){
   compass.init();
   compass.enableDefault();
   // values found via running the Calibration example in the library
-  compass.m_min = (LSM303::vector<int16_t>){-2317, -5867, -3964};
-  compass.m_max = (LSM303::vector<int16_t>){+3814, +626, +4179};
+  compass.m_min = (LSM303::vector<int16_t>){ -3223,  -6301,  -3167};
+  compass.m_max = (LSM303::vector<int16_t>){ +3573,   +252,  +4339};
 }
 
 
@@ -359,15 +362,22 @@ void CheckUDP(){
       i++;
     }
     a.v = vString.toInt();
-    a.theta = thetaString.toInt();
+    int in_theta = thetaString.toInt();
+    if (in_theta != a.theta){
+      new_theta = 1;
+    }
+    else{
+      new_theta = 0;
+    }
+    a.theta = in_theta;
     // construct and send a response string based on the c struct
     // turning the struct into a string is currently what makes the UDP
     // message send properly from the microcontroller.
     if (1==qfound){
-      String outString = String(response.odo[0])+" = x pos, "+String(response.odo[1])+" = y pos, "+String(response.odo[2])+" = z pos\n";
+      String outString = "\n\r"+String(response.odo[0])+" = x pos, "+String(response.odo[1])+" = y pos, "+String(response.odo[2])+" = z pos\n\r";
       outString = outString+String(response.imu[0])+" = ax, "+String(response.imu[1])+" = ay, "+String(response.imu[2])+" = az, ";
-      outString = outString+String(response.imu[3])+" = mx, "+String(response.imu[4])+" = my, "+String(response.imu[5])+" = mz\n";
-      outString = outString+String(response.heading)+" = heading\n";
+      outString = outString+String(response.imu[3])+" = mx, "+String(response.imu[4])+" = my, "+String(response.imu[5])+" = mz\n\r";
+      outString = outString+String(response.heading)+" = heading\n\r";
       SendUdp.beginPacket(sendIP, sendPort);
       SendUdp.print(outString);
       SendUdp.endPacket();
@@ -378,29 +388,36 @@ void CheckUDP(){
 
 // setting z angle of robot
 // outputs 1 when looking in correct direction
-int SetDir(){
+void SetDir(){
   float cur_enc_theta = (acos(TGR(0,0))*(180/PI));
   // convert +/- 180 degrees --> 0 to 360 degrees
   if (0 > cur_enc_theta){
     cur_enc_theta = 360 + cur_enc_theta;
   }
   cur_theta = cur_imu_angle;
-  if(cur_theta < ((float)a.theta - 1)){  // +/-1 a small range of acceptable angles
+  Serial.print(cur_theta);
+  Serial.print("\n");
+  if(cur_theta < ((float)a.theta - 5)){  // +/-5 a small range of acceptable angles
     Mr = TURN_SPEED;                     // for the robot to be facing, this way it system
     Ml = 0;                              // isn't constantly currecting its z-angle and never
-    return 0;                            // allowing the robot to move forward.
     tcur = 0;
     tprev = 0;
+    correct_theta = 0;
   }
-  if(cur_theta > ((float)a.theta + 1)){
+  else if(cur_theta > ((float)a.theta + 5)){
     Mr = 0;
     Ml = TURN_SPEED;
-    return 0;
     tcur = 0;
     tprev = 0;
+    correct_theta = 0;
   }
-  tprev = millis(); // now that we are facing the right dirrect, start
-  return 1;         // timer for calculating speed
+  else{
+    new_theta = 0;
+    correct_theta = 1;
+    Mr = 0;
+    Ml = 0;
+    tprev = millis(); // now that we are facing the right dirrect, start
+  }                   // timer for calculating speed
 }
 
 
@@ -408,10 +425,15 @@ int SetDir(){
 // only occurs once facing the correct direction
 void SetSpeed(){
   // current speed is in rad/ms. /1000 to make it rad/s, /60 to rad/m, then ratio to be percentage
-  float speed_perc = (float)cur_speed/(60*1000*(PERC_TO_RPM));
+  float speed_perc = ((float)cur_speed/(float)(60*1000*(PERC_TO_RPM)));
   int speed_delta = (int)(a.v - speed_perc);
-  Mr = Mr + (speed_delta * KP * PERC_TO_PWM);  // remember, analogWrite input is 0-255
-  Ml = Ml + (speed_delta * KP * PERC_TO_PWM);
+  // if the below controller does not work, dirrectly take the a.v
+  //Mr = Mr + (speed_delta * KP * PERC_TO_PWM);  // remember, analogWrite input is 0-255
+  //Ml = Ml + (speed_delta * KP * PERC_TO_PWM);
+
+  Mr = a.v * PERC_TO_PWM;
+  Ml = Mr;
+  
   if (Mr > 255){
     Mr = 255;
   }
