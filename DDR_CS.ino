@@ -259,8 +259,9 @@ void SetIMU(){
   compass.init();
   compass.enableDefault();
   // values found via running the Calibration example in the library
-  compass.m_min = (LSM303::vector<int16_t>){ -3223,  -6301,  -3167};
-  compass.m_max = (LSM303::vector<int16_t>){ +3573,   +252,  +4339};
+  compass.m_min = (LSM303::vector<int16_t>){ -2642,  -7282,  -2824};
+  compass.m_max = (LSM303::vector<int16_t>){ +3461,   +299,  +4498}
+;
 }
 
 
@@ -398,15 +399,15 @@ void SetDir(){
   Serial.print(cur_theta);
   Serial.print("\n");
   if(cur_theta < ((float)a.theta - 5)){  // +/-5 a small range of acceptable angles
-    Mr = TURN_SPEED;                     // for the robot to be facing, this way it system
-    Ml = 0;                              // isn't constantly currecting its z-angle and never
+    Mr = 0;                              // for the robot to be facing, this way it system
+    Ml = TURN_SPEED;                     // isn't constantly currecting its z-angle and never
     tcur = 0;
     tprev = 0;
     correct_theta = 0;
   }
   else if(cur_theta > ((float)a.theta + 5)){
-    Mr = 0;
-    Ml = TURN_SPEED;
+    Mr = TURN_SPEED;
+    Ml = 0;
     tcur = 0;
     tprev = 0;
     correct_theta = 0;

@@ -128,7 +128,7 @@ while(0==endloop):
 	elif ( MAX_V < v):
 		v = MAX_V
 	if ( MIN_THETA > theta):
-		theta = MIN_THETA + theta
+		theta = MAX_THETA + theta
 	elif ( MAX_THETA < theta):
 		theta = theta - MAX_THETA
 		
